@@ -1,0 +1,73 @@
+{
+  "name": "sqlite-pro",
+  "version": "0.1.0",
+  "description": "Dexie-style debounced Proxy row store for node:sqlite: narrow per-column UPDATEs, virtual fields, SAVEPOINT transactions, migrations",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:map": "node scripts/build.mjs --sourcemap",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write --list-different .",
+    "test": "node scripts/build.mjs --no-types && node --test --test-reporter=dot --experimental-test-coverage --test-coverage-lines=85 \"test/**/*.test.js\"",
+    "bench": "node bench/bench.js",
+    "docs": "node scripts/api-ref.mjs",
+    "pack-check": "node scripts/pack-check.mjs",
+    "check": "pnpm typecheck && pnpm lint && pnpm format && pnpm test",
+    "postinstall": "git config core.hooksPath .githooks",
+    "prepublishOnly": "pnpm check && pnpm build"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "sideEffects": false,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "keywords": [
+    "sqlite",
+    "node:sqlite",
+    "proxy",
+    "store",
+    "dexie",
+    "orm",
+    "migrations"
+  ],
+  "license": "MIT",
+  "author": "downloaddoctor",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/downloaddoctor/sqlite-pro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/downloaddoctor/sqlite-pro/issues"
+  },
+  "homepage": "https://github.com/downloaddoctor/sqlite-pro#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1"
+  }
+}

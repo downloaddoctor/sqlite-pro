@@ -1,0 +1,369 @@
+import type { DatabaseSync } from 'node:sqlite'
+
+/** Loose row shape: decoded camelCase objects and raw snake_case rows. */
+export type AnyRow = Record<string, any>
+
+export type ColumnType = 'text' | 'integer' | 'real' | 'boolean' | 'json'
+
+export interface ColumnDef {
+  type?: ColumnType
+  /** Override the generated snake_case column name. */
+  column?: string
+  primary?: boolean
+  required?: boolean
+  default?: string | number | boolean
+  unique?: boolean
+  /** Previous column name; migrate() / autoMigrate renames it and keeps the data. */
+  from?: string
+  references?: { table: string; column: string; onDelete?: 'cascade' | 'set null' | 'restrict' }
+}
+
+export interface Schema {
+  /** Object form, compact strings ('integer required =0', 'text required ->owners.id:cascade', 'text <-old_name' renames a column), or a Dexie list 'id, &slug, n:integer' (first = primary key, & = unique). */
+  columns: Record<string, ColumnDef | string> | string
+  /** ['a', 'b'] or 'a+b'. */
+  primaryKey?: string[] | string
+  /** [['a', 'b']] or ['a+b']. */
+  unique?: (string[] | string)[]
+  /** { name, columns } or 'a,-b' (auto-named idx_<table>_a_b) or 'my_name: a,-b'. '-' = DESC. */
+  indexes?: ({ name: string; columns: string[] } | string)[]
+  withoutRowid?: boolean
+  /** define() rebuilds the table on retype, rename (from) or drop. */
+  autoMigrate?: boolean
+  children?: { table: string; schema: Schema }[]
+  /** Column-less object fields mapped to declared columns and child tables. */
+  virtual?: Record<string, VirtualSpec>
+}
+
+/** A Schema after normalizeSchema(): every compact form expanded. */
+export interface NormalizedSchema {
+  columns: Record<string, ColumnDef>
+  primaryKey?: string[]
+  unique?: string[][]
+  indexes?: { name: string; columns: string[] }[]
+  withoutRowid?: boolean
+  autoMigrate?: boolean
+  children?: { table: string; schema: NormalizedSchema }[]
+  virtual?: Record<string, VirtualSpec>
+}
+
+export interface VirtualSpec {
+  /** Object key -> declared column field. */
+  fields?: Record<string, string>
+  /** json column field collecting all other keys. */
+  extra?: string
+  /** Object key -> { key: value } map stored as rows of a schema.children table. */
+  children?: Record<
+    string,
+    { table: string; parent: string; key: string; value: string; order?: string }
+  >
+}
+
+export type Filter = Record<string, unknown>
+
+export interface Logger {
+  warn(...args: unknown[]): void
+  error(...args: unknown[]): void
+}
+
+export interface VirtualField<Row extends object = AnyRow> {
+  /** Columns this field owns; they are excluded from auto-mapping. */
+  owns?: string[]
+  /** Map the virtual value to real columns (insert and narrow update). */
+  columns(value: any): Record<string, unknown>
+  /** Attach the field to decoded rows (once per query). */
+  hydrate?(db: DatabaseSync, pairs: { row: AnyRow; obj: Row }[]): void
+  /** Align the child table with the row; runs in SAVEPOINT zk_sync. */
+  sync(db: DatabaseSync, raw: Row): void
+}
+
+export type HookName = 'creating' | 'updating' | 'deleting' | 'reading' | 'changed'
+
+export interface StoreConfig<Row extends object = AnyRow> {
+  /** SQL table name. */
+  table: string
+  /** camelCase field -> column overrides; the rest come from PRAGMA table_info. */
+  columnMap?: Record<string, string>
+  /** Extra JSON fields (*_json columns are blobs automatically). */
+  blobKeys?: Iterable<string>
+  /** Fields decoded from 0/1 to booleans. */
+  booleanKeys?: Iterable<string>
+  /** Factories used when a blob column is NULL or corrupt. */
+  defaults?: Record<string, () => unknown>
+  /** Runs before add() INSERTs: set ids/defaults, or throw. */
+  beforeCreate?(doc: Row): void
+  /** Runs at the end of decode(). */
+  afterDecode?(obj: Row, row: AnyRow): void
+  /** Upsert target and narrow-UPDATE WHERE columns. */
+  conflict: string[]
+  /** Stable pending-map key for a row object. */
+  keyOf(obj: Row): string
+  /** Debounce window in milliseconds. */
+  flushMs: number
+  /** Log label, e.g. 'widgets'. */
+  label: string
+  /** Column for unmapped keys (default 'state_json'; null drops them). */
+  stateColumn?: string | null
+  /** Runtime-only keys, never persisted ('_'-prefixed keys always are). */
+  transientKeys?: Set<string>
+  /** false: reads return plain objects (no Proxy); update/put/modify still persist. */
+  wrapResults?: boolean
+  /** Column-less virtual fields. */
+  virtual?: Record<string, VirtualField<Row>>
+  /** Defaults to the global console. */
+  logger?: Logger
+  /** Lifecycle hooks; same as store.on. */
+  hooks?: Partial<Record<HookName, (...args: any[]) => void>>
+  /** Table definition; store.define(db) creates/extends it. */
+  schema?: Schema
+}
+
+export interface SchemaDiff {
+  missing: string[]
+  extra: string[]
+  retyped: { column: string; from: string; to: string }[]
+  renamed: { from: string; to: string }[]
+}
+
+/** Internal engine object shared between createStore and table.ts. */
+export interface InternalEngine<Row extends object = AnyRow> {
+  bind(db: DatabaseSync): Table<Row>
+  diff(db: DatabaseSync): SchemaDiff
+  migrate(db: DatabaseSync): SchemaDiff
+  on(name: HookName, fn: (...args: any[]) => void): void
+  onChange(fn: (event: { table: string; op: string }) => void): () => void
+  keyFilter(db: DatabaseSync, ...values: unknown[]): AnyRow
+  keyFilterOf(db: DatabaseSync, obj: AnyRow): AnyRow
+  cancel(key: string, options?: { tombstone?: boolean }): void
+  cancelWhere(predicate: (key: string) => boolean, options?: { tombstone?: boolean }): void
+  columnProjection(obj: AnyRow): { columns: Record<string, unknown>; state: string | null }
+  readonly schema: NormalizedSchema | undefined
+  readonly table: string
+  decode(row: AnyRow | undefined | null): AnyRow | null
+  count(db: DatabaseSync, filter?: AnyRow): number
+  create(db: DatabaseSync, fields: AnyRow): AnyRow
+  define(db: DatabaseSync): void
+  deleteMany(db: DatabaseSync, filter: AnyRow): number
+  deleteOne(db: DatabaseSync, filter: AnyRow): number
+  find(db: DatabaseSync, filter?: AnyRow | string, extra?: AnyRow | any[]): AnyRow[]
+  findById(db: DatabaseSync, ...values: unknown[]): AnyRow | null
+  findOne(db: DatabaseSync, filter?: AnyRow | string, extra?: AnyRow | any[]): AnyRow | null
+  flush(db: DatabaseSync, obj: AnyRow, dirty?: Set<string> | null): void
+  flushAll(): void
+  flushNow(db: DatabaseSync, obj: AnyRow): void
+  isTransient(key: string): boolean
+  pendingCount(): number
+  save(db: DatabaseSync, obj: AnyRow): void
+  schedule(db: DatabaseSync, obj: AnyRow, attempts?: number, dirty?: Set<string> | null): void
+  sql(db: DatabaseSync, tail?: string): string
+  updateOne(db: DatabaseSync, filter: AnyRow, patch: AnyRow): AnyRow | null
+  upsert(db: DatabaseSync, filter: AnyRow, fields?: AnyRow): AnyRow
+  wrap(db: DatabaseSync, obj: AnyRow): AnyRow
+}
+
+export interface Store<Row extends object = AnyRow> {
+  readonly table: string
+  readonly schema: NormalizedSchema | undefined
+  wrap(db: DatabaseSync, obj: Row): Row
+  flush(db: DatabaseSync, obj: Row, dirty?: Set<string> | null): void
+  flushNow(db: DatabaseSync, obj: Row): void
+  flushAll(): void
+  schedule(db: DatabaseSync, obj: Row, attempts?: number, dirty?: Set<string> | null): void
+  cancel(key: string): void
+  cancelWhere(predicate: (key: string) => boolean): void
+  columnProjection(obj: Row): { columns: Record<string, unknown>; state: string | null }
+  pendingCount(): number
+  /** creating(doc), updating(dirtyKeys, raw), deleting(doc), reading(obj), changed({ table, op }). */
+  on(name: HookName, fn: (...args: any[]) => void): void
+  /** Dexie-style table bound to one database handle. */
+  bind(db: DatabaseSync): Table<Row>
+  /** Rebuild to the schema (retype, drop, rename via from); needs foreign_keys OFF. Returns the plan. */
+  migrate(db: DatabaseSync): SchemaDiff
+  /** Declared schema vs live table; read-only. */
+  diff(db: DatabaseSync): SchemaDiff
+  /** Subscribe to create/delete ('changed'); returns unsubscribe. */
+  onChange(fn: (event: { table: string; op: string }) => void): () => void
+  /** SELECT all columns + optional tail (WHERE/ORDER BY/LIMIT). */
+  sql(db: DatabaseSync, tail?: string): string
+  /** Row (snake_case) -> plain object (camelCase). */
+  decode(row: AnyRow | undefined): Row | null
+  /** Create the table and its children from cfg.schema; add missing columns and indexes (autoMigrate rebuilds on retype, rename or drop). */
+  define(db: DatabaseSync): void
+  isTransient(key: string): boolean
+}
+
+/** Anything the migrator can own: a Store, or a plain object with define(db). */
+export interface StoreLike {
+  table?: string
+  schema?: NormalizedSchema
+  define(db: DatabaseSync): void
+  decode?(row: AnyRow): AnyRow | null
+  columnProjection?(obj: AnyRow): { columns: Record<string, unknown>; state: string | null }
+  flush?(db: DatabaseSync, obj: AnyRow): void
+  bind?(db: DatabaseSync): Table<any>
+}
+
+export interface Migration {
+  v: number
+  name: string
+  /** Run before define() with foreign keys OFF. */
+  beforeDefine?: boolean
+  /** beforeDefine steps only: return false when nothing changed (no schema_version bump). */
+  up(db: DatabaseSync, ctx: MigrationContext): void | boolean
+}
+
+export interface LegacyUpgrade {
+  name: string
+  message?: string
+  /** Transform an older on-disk shape; return true if changed. */
+  up(db: DatabaseSync): boolean
+}
+
+export interface MigratorConfig {
+  /** Schema version the declared schemas describe (default: lowest declared version, 0 when none). */
+  baseline?: number
+  /** Ladder steps applied after the baseline; each is transactional. */
+  steps?: Migration[]
+  /** Pre-baseline upgrades (foreign keys OFF). */
+  legacy?: LegacyUpgrade[]
+  /** Stores the migrator defines on every open. */
+  stores?: StoreLike[]
+  /** Create/extend host tables. */
+  define?(db: DatabaseSync): void
+  logger?: Pick<Logger, 'warn'>
+}
+
+export interface Migrator {
+  /** Highest declared version (baseline or ladder). */
+  readonly SCHEMA_VERSION: number
+  readonly baseline: number
+  readonly steps: Migration[]
+  readonly legacyUpgrades: LegacyUpgrade[]
+  readonly stores: StoreLike[]
+  /** Declare the next ladder step; attach its callback with upgrade(cb). */
+  version(n: number, name?: string): Migrator
+  /** Run the preceding version(n) step before define(), foreign keys OFF. */
+  beforeDefine(): Migrator
+  /** Attach the callback for the preceding version(n). */
+  upgrade(cb: (db: DatabaseSync, ctx: MigrationContext) => void | boolean): Migrator
+  /** Append a pre-baseline upgrade (chainable form of cfg.legacy). */
+  legacy(entry: LegacyUpgrade): Migrator
+  getVersion(db: DatabaseSync): number
+  getMeta(db: DatabaseSync, key: string): string | null
+  setMeta(db: DatabaseSync, key: string, value: unknown): void
+  /** Throws if the database is newer than the code. */
+  assertSupported(db: DatabaseSync): void
+  /** Apply ladder steps above the stored version, one transaction each. */
+  run(db: DatabaseSync, steps?: Migration[]): void
+  /** Define every owned store, then cfg.define. */
+  define(db: DatabaseSync): void
+  /** Expose stores as db.<table>, db.table(name), db.transaction(fn). */
+  attachStores(db: DatabaseSync): DatabaseSync
+  /** Full open sequence: attach stores, FK OFF, refuse newer db, legacy, meta, beforeDefine steps, define, FK ON, ladder, schema_version. */
+  prepare(db: DatabaseSync): void
+}
+
+export interface MigrationTable {
+  name: string
+  rows(): AnyRow[]
+  insert(obj: AnyRow): void
+  insertMany(list: AnyRow[]): void
+  columns(): string[]
+  rename(to: string): MigrationTable
+  drop(): void
+  sql(statement: string, ...params: unknown[]): unknown
+  get(statement: string, ...params: unknown[]): unknown
+}
+
+export interface MigrationContext {
+  table(name: string): MigrationTable
+  copy(to: string, from: string, map?: (row: AnyRow) => AnyRow): number
+  rename(from: string, to: string): MigrationTable
+  drop(name: string): void
+  storeFor(name: string): StoreLike | undefined
+}
+
+export interface OpenDatabaseConfig extends MigratorConfig {
+  /** Default file for open(). */
+  file?: string
+  /** PRAGMAs run before prepare (default WAL + busy_timeout 5000). */
+  pragmas?: string[]
+}
+
+export interface OpenDatabaseMigrator extends Migrator {
+  version(n: number, name?: string): OpenDatabaseMigrator
+  beforeDefine(): OpenDatabaseMigrator
+  upgrade(cb: (db: DatabaseSync, ctx: MigrationContext) => void | boolean): OpenDatabaseMigrator
+  legacy(entry: LegacyUpgrade): OpenDatabaseMigrator
+  /** Run PRAGMAs + prepare; returns the live handle. */
+  open(file?: string): DatabaseSync
+}
+
+export interface Collection<Row> {
+  limit(n: number): Collection<Row>
+  orderBy(field: string): Collection<Row>
+  reverse(): Collection<Row>
+  offset(n: number): Collection<Row>
+  each(fn: (row: Row) => void): void
+  primaryKeys(): unknown[][]
+  sortBy(field: string): Row[]
+  toArray(): Row[]
+  first(): Row | null
+  count(): number
+  delete(): number
+  modify(change: Partial<Row> | ((row: Row) => void)): number
+}
+
+export interface Table<Row> {
+  readonly name: string
+  get(...key: unknown[]): Row | null
+  add(doc: Partial<Row>): Row
+  put(doc: Partial<Row>): Row
+  update(key: unknown, patch: Partial<Row>): Row | null
+  delete(...key: unknown[]): number
+  where(field: string): {
+    equals(value: unknown): Collection<Row>
+    anyOf(values: unknown[]): Collection<Row>
+    isNull(): Collection<Row>
+    noneOf(values: unknown[]): Collection<Row>
+    notEqual(value: unknown): Collection<Row>
+    above(value: unknown): Collection<Row>
+    aboveOrEqual(value: unknown): Collection<Row>
+    below(value: unknown): Collection<Row>
+    belowOrEqual(value: unknown): Collection<Row>
+    between(low: unknown, high: unknown): Collection<Row>
+    startsWith(prefix: string): Collection<Row>
+  }
+  where(filter: Filter): Collection<Row>
+  toArray(): Row[]
+  count(): number
+  first(): Row | null
+  orderBy(field: string): Collection<Row>
+  limit(n: number): Collection<Row>
+  bulkAdd(docs: Partial<Row>[]): Row[]
+  bulkPut(docs: Partial<Row>[]): Row[]
+  bulkDelete(keys: unknown[]): number
+  clear(): number
+  save(doc: Row): void
+  flush(): void
+  pending(): number
+  /** Same as store.on(name, fn). */
+  hook(name: HookName, fn: (...args: any[]) => void): void
+  /** Declared schema vs live table; read-only. */
+  diff(): SchemaDiff
+  /** Same as store.migrate. */
+  migrate(): SchemaDiff
+  /** Runs fn(table) now and after every create/delete; subscribe returns unsubscribe. */
+  liveQuery<T>(fn: (table: Table<Row>) => T): { subscribe(cb: (value: T) => void): () => void }
+  /** schema.children tables by name and short alias (widgets.tags = widget_tags). */
+  children: Record<string, Table<any>>
+  [alias: string]: any
+}
+
+declare module 'node:sqlite' {
+  interface DatabaseSync {
+    /** Cached bound table for a migrator-owned store. */
+    table(name: string): Table<any>
+    transaction<T>(fn: () => T): T
+  }
+}

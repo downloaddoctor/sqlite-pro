@@ -143,6 +143,19 @@ export function createMigrationContext(
     }
   }
 
+  function hasTable(name: string): boolean {
+    ident(name, 'table')
+    return (
+      db
+        .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .get(name) !== undefined
+    )
+  }
+
+  function hasColumn(tableName: string, column: string): boolean {
+    return tableInfo(db, tableName).some((info) => info.name === column)
+  }
+
   // Copy all rows from -> to through fn (default identity); returns the count.
   function copy(to: string, from: string, fn?: (row: AnyRow) => AnyRow): number {
     const source = table(from)
@@ -161,6 +174,8 @@ export function createMigrationContext(
       table(name).drop()
     },
     storeFor,
+    hasTable,
+    hasColumn,
     table,
   }
 }

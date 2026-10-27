@@ -26,6 +26,7 @@
     "format:fix": "prettier --write --list-different .",
     "test": "node scripts/build.mjs --no-types && node --test --test-reporter=dot --experimental-test-coverage --test-coverage-lines=85 \"test/**/*.test.js\"",
     "bench": "node bench/bench.js",
+    "release": "node scripts/release.mjs",
     "docs": "node scripts/api-ref.mjs",
     "pack-check": "node scripts/pack-check.mjs",
     "check": "pnpm typecheck && pnpm lint && pnpm format && pnpm test",

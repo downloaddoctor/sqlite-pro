@@ -281,6 +281,10 @@ export interface MigrationContext {
   rename(from: string, to: string): MigrationTable
   drop(name: string): void
   storeFor(name: string): StoreLike | undefined
+  /** True when a table with this name exists. */
+  hasTable(name: string): boolean
+  /** True when the table exists and has this column (false for a missing table). */
+  hasColumn(table: string, column: string): boolean
 }
 
 export interface OpenDatabaseConfig extends MigratorConfig {

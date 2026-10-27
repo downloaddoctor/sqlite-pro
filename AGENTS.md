@@ -32,7 +32,7 @@ src/schema.ts — ident (SQL identifier guard: table/column/index names must mat
 src/table.ts — bindTable (Dexie facade: collection, where operators, bulk_, liveQuery), transaction (nested SAVEPOINT), attachHelpers (db.table, db.transaction)
 src/virtual.ts — buildVirtual: derive owns/columns/hydrate/sync from schema.virtual (fields, extra json, children map rows)
 src/migrate.ts — createMigrator (ladder, legacy, beforeDefine, prepare; steps without an upgrade callback are refused), openDatabase (PRAGMAs + open; closes the handle when prepare throws)
-src/context.ts — createMigrationContext: table(name) rows/insert/rename/drop, copy, storeFor
+src/context.ts — createMigrationContext: table(name) rows/insert/rename/drop, copy, storeFor, hasTable, hasColumn
 scripts/api-ref.mjs — reads src/types.ts + src/index.ts via TS compiler API, emits docs/API.md (type and member doc comments included)
 eslint.config.js prettier: single quotes, no semis, width 100, LF
 

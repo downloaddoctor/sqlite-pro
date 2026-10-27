@@ -4,6 +4,8 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-27
+
 ### Added
 
 - `ctx.hasTable(name)` and `ctx.hasColumn(table, column)` on the migration context, so upgrade callbacks can probe the live schema without hand-written SQL.

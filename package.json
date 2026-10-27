@@ -1,6 +1,6 @@
 {
   "name": "sqlite-pro",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dexie-style debounced Proxy row store for node:sqlite: narrow per-column UPDATEs, virtual fields, SAVEPOINT transactions, migrations",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",

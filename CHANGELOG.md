@@ -4,6 +4,8 @@ All notable changes are listed here. Format: [Keep a Changelog](https://keepacha
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-27
+
 ### Fixed
 
 - Reads inside the debounce window now return the live pending row, so a second read-modify-write before the flush no longer overwrites the first (whole-object reassigns of virtual fields were reverted).

@@ -242,10 +242,17 @@ export function createStore<Row extends object = AnyRow>(cfg: StoreConfig<Row>):
     flush: (db, obj, dirty) => flush(db, obj, dirty),
   })
 
+  // Read-your-writes: a row with an unflushed write returns the live pending object, so a second read-modify-write inside the debounce window cannot be lost.
+  function livePending(db: DatabaseSync, hydrated: AnyRow): AnyRow {
+    const entry = pending.get(keyOf(hydrated))
+    return entry && entry.db === db ? entry.obj : hydrated
+  }
+
   function find(db: DatabaseSync, filter: AnyRow | string = {}, extra?: AnyRow | any[]): AnyRow[] {
     const { tail, params } = query(db, filter, extra)
     const rows = prepare(db, sql(db, tail)).all(...params) as AnyRow[]
-    return hydrate(db, rows).map((obj) => {
+    return hydrate(db, rows).map((hydrated) => {
+      const obj = livePending(db, hydrated)
       emit('reading', obj)
       return wrapResults ? wrap(db, obj) : obj
     })
@@ -259,7 +266,7 @@ export function createStore<Row extends object = AnyRow>(cfg: StoreConfig<Row>):
     const { tail, params } = query(db, filter, extra)
     const row = prepare(db, sql(db, tail)).get(...params) as AnyRow | undefined
     if (!row) return null
-    const obj = hydrate(db, [row])[0] as AnyRow
+    const obj = livePending(db, hydrate(db, [row])[0] as AnyRow)
     emit('reading', obj)
     return wrapResults ? wrap(db, obj) : obj
   }
